@@ -1,0 +1,14 @@
+# dsh-approval-alert bundle patch.
+#
+# Used when this package is installed through the official plugin channel
+# (profile bundle stack). A manual mount in the profile's own
+# ~/.dsh/profiles/desktop/cordis.patch.yml works too — use ONE of the two,
+# never both (two mounts would register the overlay twice and play the chime
+# twice).
+#
+# The `!!js` disabled expression backs this row out when another enabled row
+# (e.g. a manual mount with a different id) already mounts the same package.
+- insert:
+    - id: approval-alert
+      name: 'dsh-approval-alert'
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-approval-alert' && e.options.id !== 'approval-alert' && !e.disabled)"

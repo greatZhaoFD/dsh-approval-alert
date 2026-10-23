@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Approval alert bell">
+  <rect width="64" height="64" rx="14" fill="#fff4e0"/>
+  <path d="M32 14c-7.7 0-13 5.9-13 13.4v8.1l-3.4 6.1c-.9 1.6.2 3.4 2 3.4h28.8c1.8 0 2.9-1.8 2-3.4L45 35.5v-8.1C45 19.9 39.7 14 32 14z" fill="#e6a23c"/>
+  <path d="M26.5 48a5.5 5.5 0 0 0 11 0z" fill="#c9821f"/>
+  <circle cx="32" cy="10" r="2.4" fill="#e6a23c"/>
+</svg>

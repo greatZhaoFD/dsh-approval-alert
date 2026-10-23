@@ -1,0 +1,75 @@
+{
+  "name": "dsh-approval-alert",
+  "version": "0.1.0",
+  "description": "Frame-wide alert for pending DSH approvals and questions: popup overlay + chime (OS notification optional, off by default).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    },
+    "compatibility": {
+      "dsh": ">=0.2.0-rc.1",
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible"
+      }
+    }
+  },
+  "scripts": {
+    "test": "node test/smoke.test.mjs",
+    "prepublishOnly": "node test/smoke.test.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "scripts/install.ps1",
+    "scripts/uninstall.ps1",
+    "test/smoke.test.mjs",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh-desktop",
+    "approval",
+    "notification",
+    "alert",
+    "sound",
+    "cordis"
+  ],
+  "author": "greatZhaoFD",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/greatZhaoFD/dsh-approval-alert.git"
+  },
+  "homepage": "https://github.com/greatZhaoFD/dsh-approval-alert#readme",
+  "bugs": {
+    "url": "https://github.com/greatZhaoFD/dsh-approval-alert/issues"
+  }
+}
