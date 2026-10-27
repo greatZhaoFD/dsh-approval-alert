@@ -28,25 +28,31 @@ function section(title) {
 }
 
 // ---------------------------------------------------------------------------
-// Fake React: enough of the hooks surface for a static render + effect replay.
+// Fake React: hooks that persist across re-renders of one mounted component.
 // ---------------------------------------------------------------------------
 function createFakeReact() {
-  const effects = [];
-  const elements = [];
+  const state = [];
+  const refs = [];
+  let effects = [];
+  let index = 0;
   const React = {
     createElement(type, props, ...children) {
       const element = { type, props: { ...(props ?? {}) } };
       if (children.length === 1) element.props.children = children[0];
       else if (children.length > 1) element.props.children = children;
-      elements.push(element);
       return element;
     },
     useState(initial) {
-      const value = typeof initial === 'function' ? initial() : initial;
-      return [value, () => {}];
+      const slot = index++;
+      if (!(slot in state)) state[slot] = typeof initial === 'function' ? initial() : initial;
+      return [state[slot], (next) => {
+        state[slot] = typeof next === 'function' ? next(state[slot]) : next;
+      }];
     },
     useRef(initial) {
-      return { current: initial };
+      const slot = index++;
+      if (!(slot in refs)) refs[slot] = { current: initial };
+      return refs[slot];
     },
     useEffect(callback) {
       effects.push(callback);
@@ -59,7 +65,22 @@ function createFakeReact() {
     },
     Fragment: Symbol('Fragment')
   };
-  return { React, effects, elements };
+  return {
+    React,
+    reset() {
+      state.length = 0;
+      refs.length = 0;
+      index = 0;
+      effects = [];
+    },
+    begin() {
+      index = 0;
+      effects = [];
+    },
+    takeEffects() {
+      return effects.slice();
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +89,7 @@ function createFakeReact() {
 const notifications = [];
 const oscillators = [];
 const oscillated = () => oscillators.length;
+const focusState = { focused: true };
 
 class FakeNotification {
   static permission = 'granted';
@@ -115,6 +137,7 @@ class FakeAudioContext {
 }
 
 const storage = new Map();
+const PREFS_KEY = 'dsh-approval-alert.prefs.v2';
 const sandboxWindow = {
   localStorage: {
     getItem: (key) => (storage.has(key) ? storage.get(key) : null),
@@ -141,6 +164,7 @@ const sandbox = {
   window: sandboxWindow,
   document: {
     hidden: false,
+    hasFocus: () => focusState.focused,
     addEventListener: () => {},
     removeEventListener: () => {}
   },
@@ -156,12 +180,10 @@ const sandbox = {
   Math,
   Promise,
   Error,
-  TypeOf: undefined,
   setTimeout: () => 0,
   clearTimeout: () => {},
   setInterval: () => 0,
-  clearInterval: () => {},
-  globalThis: undefined
+  clearInterval: () => {}
 };
 sandbox.globalThis = sandbox;
 
@@ -188,9 +210,9 @@ check('exactly one module registered', moduleLoader.captured.length === 1, Strin
 const definition = moduleLoader.captured[0];
 check('module id matches package name', definition.id === 'dsh-approval-alert', definition.id);
 
-const { React, effects } = createFakeReact();
+const fake = createFakeReact();
 const fakeRequire = (name) => {
-  if (name === 'react') return React;
+  if (name === 'react') return fake.React;
   throw new Error(`unexpected module request: ${name}`);
 };
 const clientExports = definition.factory(fakeRequire);
@@ -247,10 +269,12 @@ const injected = slotEntry.options.inject();
 check('inject exposes openSession', typeof injected.openSession === 'function');
 
 // ---------------------------------------------------------------------------
-// Helpers to render the slot component with a given session-status map.
+// Render helpers: `render` mounts a fresh component, `renderAgain` re-renders
+// the same component so hook state (running baselines, completion events)
+// survives exactly like it does in the real renderer.
 // ---------------------------------------------------------------------------
-function render({ statuses, sessions = { byId: {} } }) {
-  effects.length = 0;
+function renderInto({ statuses, sessions = { byId: {} } }) {
+  fake.begin();
   const props = {
     t,
     openSession: injected.openSession,
@@ -258,7 +282,17 @@ function render({ statuses, sessions = { byId: {} } }) {
     useSessions: (selector) => selector(sessions)
   };
   const tree = slotEntry.Component(props);
-  return { tree, effects: [...effects] };
+  return { tree, effects: fake.takeEffects() };
+}
+function render(options) {
+  fake.reset();
+  return renderInto(options);
+}
+function renderAgain(options) {
+  return renderInto(options);
+}
+function runEffects(rendered) {
+  for (const effect of rendered.effects) effect();
 }
 
 function textOf(node) {
@@ -268,6 +302,24 @@ function textOf(node) {
   if (typeof node === 'object' && node.props) return textOf(node.props.children);
   return '';
 }
+
+function findButton(node, needle) {
+  if (node === null || node === undefined) return undefined;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findButton(child, needle);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  if (typeof node !== 'object' || node.props === undefined) return undefined;
+  if (node.type === 'button' && textOf(node).includes(needle)) return node;
+  return findButton(node.props.children, needle);
+}
+
+const completionIdle = new Map([['s1', { running: false, completionUnread: false }]]);
+const completionRunning = new Map([['s1', { running: true, completionUnread: false }]]);
+const completionSessions = { byId: { s1: { title: '写周报' } } };
 
 section('render: no pending interaction');
 const idle = render({ statuses: new Map([['s1', { running: false, pendingInteraction: undefined, completionUnread: false }]]) });
@@ -297,19 +349,20 @@ check('shows approval title', approvalText.includes('审批'), approvalText);
 check('shows tool name', approvalText.includes('pwsh'), approvalText);
 check('shows session title', approvalText.includes('重构审批流程'), approvalText);
 check('has an open-session button', approvalText.includes('前往会话'), approvalText);
-for (const effect of approval.effects) effect();
+check('has a completion-alert toggle', approvalText.includes('完成提醒'), approvalText);
+runEffects(approval);
 check('default prefs raise NO OS notification', notifications.length === 0, String(notifications.length));
 check('plays a three-note chime', oscillated() === 3, String(oscillated()));
 
 section('render: OS notification when explicitly enabled');
 notifications.length = 0;
 oscillators.length = 0;
-storage.set('dsh-approval-alert.prefs.v2', JSON.stringify({ sound: true, notify: true }));
+storage.set(PREFS_KEY, JSON.stringify({ sound: true, notify: true }));
 const notified = render({ statuses: approvalStatuses, sessions: { byId: { s1: { title: '重构审批流程' } } } });
-for (const effect of notified.effects) effect();
+runEffects(notified);
 check('raises exactly one OS notification', notifications.length === 1, String(notifications.length));
 check('notification body names the tool', notifications[0]?.options?.body?.includes('pwsh') === true, notifications[0]?.options?.body);
-storage.delete('dsh-approval-alert.prefs.v2');
+storage.delete(PREFS_KEY);
 
 section('notification click opens the session');
 notifications[0].onclick();
@@ -350,6 +403,92 @@ const mixed = render({
 const mixedText = textOf(mixed.tree);
 check('shows a pending count for extra items', /\+1/.test(mixedText), mixedText);
 
+// ---------------------------------------------------------------------------
+section('completion: running -> idle raises card + two-note chime');
+notifications.length = 0;
+oscillators.length = 0;
+const mountRunning = render({ statuses: completionRunning, sessions: completionSessions });
+runEffects(mountRunning);
+check('baseline raises no completion alert', oscillated() === 0 && notifications.length === 0, `${oscillated()}/${notifications.length}`);
+const stopped = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+runEffects(stopped);
+check('plays a two-note completion chime', oscillated() === 2, String(oscillated()));
+const completionView = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+const completionText = textOf(completionView.tree);
+check('renders a completion card', completionView.tree !== null);
+check('shows completion title', completionText.includes('任务已完成'), completionText);
+check('names the finished session', completionText.includes('写周报'), completionText);
+check('offers open + dismiss actions', completionText.includes('前往会话') && completionText.includes('关闭'), completionText);
+
+section('completion: dismiss clears the card');
+const closeButton = findButton(completionView.tree, '关闭');
+check('completion card has a dismiss button', closeButton !== undefined);
+closeButton?.props?.onClick?.();
+const dismissed = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+check('card disappears after dismiss', dismissed.tree === null, textOf(dismissed.tree));
+
+section('completion: OS notification when enabled');
+notifications.length = 0;
+oscillators.length = 0;
+storage.set(PREFS_KEY, JSON.stringify({ sound: false, notify: true }));
+const notifMount = render({ statuses: completionRunning, sessions: completionSessions });
+runEffects(notifMount);
+const notifStopped = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+runEffects(notifStopped);
+check('raises exactly one completion notification', notifications.length === 1, String(notifications.length));
+check('completion notification title mentions the task', notifications[0]?.title?.includes('任务完成') === true, notifications[0]?.title);
+check('completion notification names the session', notifications[0]?.options?.body?.includes('写周报') === true, notifications[0]?.options?.body);
+storage.delete(PREFS_KEY);
+
+section('completion: focused main session stays silent');
+focusState.focused = true;
+const mainSessions = { byId: { s9: { title: '当前会话', retainedBy: { mainView: 1 } } } };
+const mainRunning = new Map([['s9', { running: true }]]);
+const mainIdle = new Map([['s9', { running: false }]]);
+const focusMount = render({ statuses: mainRunning, sessions: mainSessions });
+runEffects(focusMount);
+notifications.length = 0;
+oscillators.length = 0;
+const focusStopped = renderAgain({ statuses: mainIdle, sessions: mainSessions });
+runEffects(focusStopped);
+const focusView = renderAgain({ statuses: mainIdle, sessions: mainSessions });
+check('focused main session does not chime', oscillated() === 0, String(oscillated()));
+check('focused main session shows no completion card', focusView.tree === null, textOf(focusView.tree));
+
+section('completion: unfocused main session still alerts');
+focusState.focused = false;
+const unfocusedMount = render({ statuses: mainRunning, sessions: mainSessions });
+runEffects(unfocusedMount);
+oscillators.length = 0;
+const unfocusedStopped = renderAgain({ statuses: mainIdle, sessions: mainSessions });
+runEffects(unfocusedStopped);
+check('unfocused main session chimes', oscillated() === 2, String(oscillated()));
+focusState.focused = true;
+
+section('completion: stopping while an approval is pending is not a completion');
+const pendingInteraction = { key: 'approval:5', kind: 'approval', sessionId: 's2', toolName: 'pwsh', answerable: true, answer: () => {} };
+const pendingRunning = new Map([['s2', { running: true, completionUnread: false, pendingInteraction }]]);
+const pendingIdleStatuses = new Map([['s2', { running: false, completionUnread: false, pendingInteraction }]]);
+const pendingSessions = { byId: { s2: { title: '审批中' } } };
+const pendingMount = render({ statuses: pendingRunning, sessions: pendingSessions });
+runEffects(pendingMount);
+oscillators.length = 0;
+const pendingStopped = renderAgain({ statuses: pendingIdleStatuses, sessions: pendingSessions });
+runEffects(pendingStopped);
+check('no completion chime while approval is still pending', oscillated() === 0, String(oscillated()));
+
+section('completion: disabled by preference');
+storage.set(PREFS_KEY, JSON.stringify({ completion: false, sound: true }));
+const offMount = render({ statuses: completionRunning, sessions: completionSessions });
+runEffects(offMount);
+oscillators.length = 0;
+const offStopped = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+runEffects(offStopped);
+const offView = renderAgain({ statuses: completionIdle, sessions: completionSessions });
+check('disabled completion does not chime', oscillated() === 0, String(oscillated()));
+check('disabled completion shows no card', offView.tree === null, textOf(offView.tree));
+storage.delete(PREFS_KEY);
+
 section('package manifest');
 const manifest = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
 check('declares web client half', manifest.dsh?.client?.platform === 'web');
@@ -362,6 +501,7 @@ const englishMeta = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'locale', '
 check('english locale carries meta.title', typeof englishMeta.meta?.title === 'string' && englishMeta.meta.title.length > 0);
 check('no engines.dsh prerelease trap', manifest.engines?.dsh === undefined, manifest.engines?.dsh);
 check('declares bundle patch', manifest.dsh?.bundle?.patch !== undefined);
+check('version carries the completion feature', manifest.version === '0.2.0', manifest.version);
 
 console.log(`\n${failures === 0 ? 'PASS' : `FAIL (${failures})`}: smoke test finished`);
 process.exitCode = failures === 0 ? 0 : 1;

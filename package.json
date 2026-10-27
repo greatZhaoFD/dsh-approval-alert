@@ -1,7 +1,7 @@
 {
   "name": "dsh-approval-alert",
-  "version": "0.1.0",
-  "description": "Frame-wide alert for pending DSH approvals and questions: popup overlay + chime (OS notification optional, off by default).",
+  "version": "0.2.0",
+  "description": "Frame-wide alerts for pending DSH approvals/questions and for finished tasks: popup overlay + chime (OS notification optional, off by default).",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -54,6 +54,7 @@
     "dsh-plugin",
     "dsh-desktop",
     "approval",
+    "completion",
     "notification",
     "alert",
     "sound",

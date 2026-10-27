@@ -1,6 +1,6 @@
 # dsh-approval-alert
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的**全局待办提醒**插件：当某个会话出现等待你审批 / 回答 / 确认计划时，在窗口顶部弹出醒目卡片并播放提示音（系统通知默认关闭，可一键开启；Windows 上是右下角 toast，点一下回到对应会话）。
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）的**全局提醒**插件：当某个会话出现等待你审批 / 回答 / 确认计划时，或某个任务运行完成时，在窗口顶部弹出醒目卡片并播放提示音（系统通知默认关闭，可一键开启；Windows 上是右下角 toast，点一下回到对应会话）。
 
 不修改 DSH 本体（`app.asar`），是一个标准的 profile 插件包，DSH 升级后仍然存在。
 
@@ -14,11 +14,25 @@
         + 三音提示音（系统通知默认关闭，可在卡片上开启）
 ```
 
+完成时另外弹出：
+
+```
+┌─ 窗口顶部正中 ─────────────────────────────────────────────┐
+│ ●  任务已完成                                              │
+│    会话「重构审批流程」已完成本轮任务。                     │
+│    会话：重构审批流程       [🔔] [通知关] [完成提醒开]      │
+│                                          [关闭] [前往会话]  │
+└────────────────────────────────────────────────────────────┘
+        + 两音提示音（与审批的三音不同，听声音就能分辨）
+```
+
 ## 它解决什么问题
 
 DSH 原生的审批提示只是**输入框上方的一张 composer 小卡片**。它没有声音、没有系统通知、没有任务栏提醒；而桌面端窗口关闭后是收进托盘继续运行。于是当你在别的屏幕、别的会话、或者最小化了窗口时，一个等待审批的操作可能挂很久才被发现，agent 就一直干等。
 
 本插件监听客户端会话状态里的"待处理交互"（`pendingInteraction`），把提示提升为**全窗口浮层 + 声音**（系统通知可选），并在窗口不可见时周期性重复提醒。
+
+同理，长任务跑完时如果你在别的窗口、别的会话或别的屏幕，也容易错过"已经跑完"的结果。DSH 自带的完成标记（`completionUnread`）只在会话不是当前主视图时才出现，当前主会话跑完不会有任何提示；所以本插件同时监听会话的 `running` 状态，任务结束时也弹卡片 + 提示音。
 
 ## 效果
 
@@ -29,8 +43,11 @@ DSH 原生的审批提示只是**输入框上方的一张 composer 小卡片**�
 | `approval` | 工具请求越权执行（工作区外写入、沙箱升权等） | 「有操作等待你审批」+ 工具名 |
 | `question` | `ask_user_question` 等待回答 | 「DSH 在等待你的回答」 |
 | `plan-review` | 计划模式等待确认 | 「计划等待你确认」 |
+| 任务完成 | 会话 `running` 由 `true` 变为 `false`（一轮任务结束） | 「任务已完成」+ 会话名 |
 
 同一个请求只提醒一次；请求被回答或取消后，卡片与通知自动消失。
+
+任务完成提醒只针对"你可能没注意到"的情况：正在前台查看的那个会话不打扰；其他会话结束时、或主会话在窗口失焦/最小化时跑完，都会提醒。完成提醒可在卡片上单独开关（「完成提醒开/关」）。
 
 ### 交互
 
@@ -38,10 +55,11 @@ DSH 原生的审批提示只是**输入框上方的一张 composer 小卡片**�
 - **稍后提醒**：浮层收起 2 分钟，到期后重新弹出并提醒。
 - **🔔 / 通知**：即时开关提示音 / 系统通知（系统通知默认关），偏好写入 `localStorage`。
 - 窗口最小化或切到别的虚拟桌面（`document.hidden`）时，若请求仍在等待，每 60 秒重响一次，最多 15 次。
+- **完成提醒**：任务结束时弹「任务已完成」卡片，点「前往会话」直接看结果，点「关闭」收起；「完成提醒开/关」可单独关闭这类提醒。
 
 ### 系统通知（默认关闭）
 
-本插件默认**只弹顶部卡片 + 响提示音**，不弹系统通知。需要时可在卡片上点「通知开」临时开启（偏好存 localStorage），或在 `DEFAULT_PREFS` 里把 `notify` 改成 `true`。开启后通过渲染进程标准的 `Notification` API 弹出（Electron 桌面端显示为 Windows toast），点击通知会尝试聚焦窗口并直接打开对应会话。
+本插件默认**只弹顶部卡片 + 响提示音**，不弹系统通知。需要时可在卡片上点「通知开」临时开启（偏好存 localStorage），或在 `DEFAULT_PREFS` 里把 `notify` 改成 `true`。开启后通过渲染进程标准的 `Notification` API 弹出（Electron 桌面端显示为 Windows toast），点击通知会尝试聚焦窗口并直接打开对应会话。完成提醒使用同一个开关，通知标题为「DSH：任务完成」。
 
 ## 安装
 
@@ -107,7 +125,7 @@ pwsh -File scripts\install.ps1
 node test\smoke.test.mjs
 ```
 
-这是项目自带的**无头冒烟测试**，不启动 DSH 也能验证客户端 bundle 的模块包装、slot 注册、三种提醒文案、系统通知内容、点击通知跳转会话、提示音触发等。安装到 DSH 后，触发一次审批（例如让 agent 在工作区外写文件）即可看到完整效果；也可以在「设置 → 插件」列表里确认出现「审批提醒 / Approval Alert」。
+这是项目自带的**无头冒烟测试**，不启动 DSH 也能验证客户端 bundle 的模块包装、slot 注册、四种提醒文案（审批/提问/计划/完成）、完成提醒的触发与单独开关、系统通知内容、点击通知跳转会话、提示音触发等。安装到 DSH 后，触发一次审批（例如让 agent 在工作区外写文件）即可看到审批效果；让一个任务在窗口失焦时跑完，即可看到完成提醒。也可以在「设置 → 插件」列表里确认出现「审批与完成提醒 / Approval & Completion Alert」。
 
 ## 卸载
 
@@ -124,12 +142,13 @@ node test\smoke.test.mjs
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `sound` | `true` | 是否播放提示音 |
+| `completion` | `true` | 是否启用任务完成提醒 |
 | `notify` | `false` | 是否弹系统通知（默认关，只留卡片 + 声音） |
 | `snoozeMs` | `120000` | 「稍后提醒」/「前往会话」后收起多久 |
 | `repeatMs` | `60000` | 窗口隐藏时重复提醒间隔 |
 | `repeatLimit` | `15` | 窗口隐藏时最多重复次数 |
 
-提示音是 Web Audio 实时合成的三音上行短铃（880 / 1174.66 / 1567.98 Hz），不需要音频文件；想换音色/音量改 `playChime()` 即可。
+提示音是 Web Audio 实时合成的短铃，不需要音频文件：审批是三音上行（880 / 1174.66 / 1567.98 Hz），完成是两音（659.25 / 987.77 Hz），想换音色/音量改 `playPendingChime()` / `playCompletionChime()` 即可。
 
 ## 工作原理
 
@@ -140,12 +159,13 @@ DSH Host（Node，被 Electron 启动）
 Web 页面（Electron 渲染进程）
   └─ Cordis 客户端插件：lib/client.js
         ├─ ctx.slots.inject('shell.overlay')  → 注册全窗口浮层组件
-        ├─ props.useSessionStatus(selector)   → 读取各会话 pendingInteraction
+        ├─ props.useSessionStatus(selector)   → 读取各会话 pendingInteraction（待办）
+        ├─ 同一 hook 的 running 变化           → 检测任务完成（有 pending 时以 pending 优先）
         ├─ Web Audio                          → 提示音
         └─ new Notification(...)              → 系统通知
 ```
 
-- **检测**：`shell.overlay` 是 root scope 的 list slot，其标准 props 含 `useSessionStatus`（`Map<sessionId, { running, pendingInteraction, completionUnread }>`）。读取 `pendingInteraction.kind/answerable/toolName` 即可知道是否有待办；不依赖任何内部 store 或 DOM。
+- **检测**：`shell.overlay` 是 root scope 的 list slot，其标准 props 含 `useSessionStatus`（`Map<sessionId, { running, pendingInteraction, completionUnread }>`）。读取 `pendingInteraction.kind/answerable/toolName` 即可知道是否有待办；同时记录每个会话的 `running`，`true → false` 且没有新的 pending 交互时视为任务完成。`completionUnread` 只作为参考（它不覆盖当前主会话）。不依赖任何内部 store 或 DOM。
 - **渲染**：注册一个 `id` 独特的 overlay 条目（附加式，不替换任何官方 UI）；浮层容器 `pointer-events: none`，只有卡片本身接收点击，不会挡住应用。
 - **降级**：slot 不存在 → 静默不显示；hook 缺失 → 静默不提醒；`Notification` / `AudioContext` 不可用或权限不足 → 少一个能力，不抛错。
 - **宿主半为什么是空的**：它只负责让包成为一个被 Loader 加载的条目。启动时它会检查 `lib/client.js` 是否存在——若声明了 `dsh.client` 却缺少客户端产物，`client-modules` 这个必需服务会在构造期抛错，可能导致 **DSH 无法启动**；让宿主半先失败（被 Loader 隔离）可以把这种最坏情况降级为"插件不加载"。
@@ -167,7 +187,7 @@ Web 页面（Electron 渲染进程）
 
 ### DSH 升级后检查清单（约 1 分钟）
 
-1. 重启后触发一次审批，确认卡片 + 声音都在（系统通知默认关，需要时再开）；
+1. 重启后触发一次审批，确认卡片 + 声音都在；再让一个任务在窗口失焦时跑完，确认完成卡片 + 两音提示音（系统通知默认关，需要时再开）；
 2. 若没有：打开「设置 → 插件」，看插件列表是否报告客户端 bundle 加载失败（说明客户端模块格式变了，需要按新版重打 `lib/client.js`）；
 3. 若插件加载正常但不弹窗：确认 `shell.overlay` slot 仍存在、`useSessionStatus` 的 `pendingInteraction` 仍有 `kind` 字段（对照 `@deepseek-ai/dsh-client-ui-layout`、`dsh-client-ui-approval` 的 `lib/client.js`）；
 4. 都不行就停用/卸载并重启，退回原状，不影响 DSH 使用；
@@ -216,6 +236,7 @@ node test\smoke.test.mjs
 ## 常见问题
 
 - **没声音？** 先确认系统/DSH 没静音；Web Audio 需要页面有过一次键鼠操作（触发审批前必然有过）。Windows 通知音是否播放取决于系统设置。
+- **任务跑完没提醒？** 正在前台查看的会话不会打扰；切到别的窗口、最小化、或让其他会话跑完时才会提醒。
 - **两声？** 默认不会：系统通知默认关闭，只有提示音。若你手动开了系统通知，提示音可能与系统通知音叠加，点卡片「通知关」即可。
 - **弹了两次 / 响两次？** 多半是同时用了插件管理器安装和脚本安装（重复挂载）。保留一种，卸载另一种后重启。
 - **想只提醒审批、不要提问提醒？** 改 `lib/client.js` 顶部 `ALERT_KINDS`，只保留 `"approval"`。
@@ -223,7 +244,7 @@ node test\smoke.test.mjs
 
 ## 已知限制
 
-- 只覆盖"等待用户处理的交互"（审批/提问/计划确认）；普通任务完成通知不在范围内。
+- 完成提醒只能判断"这一轮跑完了"，不区分成功/失败/被用户中断，也不提供耗时或结果摘要。
 - 浮层渲染在页面内，**不能**强制窗口置顶或闪任务栏；窗口最小化时依赖提示音（可选系统通知）。
 - 同一 DSH 打开多个浏览器页面时会各自提醒（每个页面一份渲染进程）。
 - 提示音音量固定写在代码里，未做设置页。

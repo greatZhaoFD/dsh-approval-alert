@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Approval Alert",
-    "description": "Pops a frame-wide alert, plays a chime, and raises a desktop notification when an approval, question, or plan review is waiting."
+    "title": "Approval & Completion Alert",
+    "description": "Pops a frame-wide alert and plays a chime when an approval, question, or plan review is waiting, and when a task finishes (desktop notification optional)."
   }
 }
